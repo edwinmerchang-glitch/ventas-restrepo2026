@@ -93,15 +93,25 @@ export default function Dashboard() {
     if (!filas) return null
     const visibles = empleados.filter((e) => depto === 'Todos' || e.department === depto)
     const porEmp = {}
-    filas.forEach((r) => { porEmp[r.employee_id] = (porEmp[r.employee_id] || 0) + totalVenta(r) })
+    filas.forEach((r) => {
+      const acc = porEmp[r.employee_id] || { autoliquidable: 0, oferta: 0, marca: 0, adicional: 0 }
+      acc.autoliquidable += r.autoliquidable || 0
+      acc.oferta += r.oferta || 0
+      acc.marca += r.marca || 0
+      acc.adicional += r.adicional || 0
+      porEmp[r.employee_id] = acc
+    })
     return visibles
-      .map((e) => ({
-        id: e.id,
-        nombre: e.name,
-        depto: e.department,
-        total: porEmp[e.id] || 0,
-        color: DEPT_COLORS[e.department] || '#0E7C6B',
-      }))
+      .map((e) => {
+        const c = porEmp[e.id] || { autoliquidable: 0, oferta: 0, marca: 0, adicional: 0 }
+        return {
+          id: e.id,
+          nombre: e.name,
+          depto: e.department,
+          ...c,
+          total: c.autoliquidable + c.oferta + c.marca + c.adicional,
+        }
+      })
       .sort((a, b) => b.total - a.total)
   }, [filas, empleados, depto])
 
@@ -199,30 +209,35 @@ export default function Dashboard() {
               /* Comparativo de todos */
               <>
                 <p className="texto-suave" style={{ marginTop: 0 }}>
-                  Total del período por funcionario, ordenado de mayor a menor y coloreado por departamento.
-                  Selecciona a alguien para ver su registro día a día.
+                  Ventas por funcionario desglosadas por categoría, de mayor a menor.
+                  Toca la barra de alguien (o selecciónalo arriba) para ver su registro día a día.
                 </p>
-                <ResponsiveContainer width="100%" height={Math.max(240, comparativo.length * 34)}>
-                  <BarChart data={comparativo} layout="vertical" margin={{ left: 60, right: 40 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--borde)" horizontal={false} />
-                    <XAxis type="number" fontSize={12} />
-                    <YAxis type="category" dataKey="nombre" width={150} fontSize={11} interval={0} />
-                    <Tooltip formatter={(v) => [fmt(v), 'Unidades']} />
-                    <Bar dataKey="total" radius={[0, 6, 6, 0]} cursor="pointer"
-                      onClick={(d) => d?.id && setEmpleadoSel(String(d.id))}>
-                      {comparativo.map((c) => <Cell key={c.id} fill={c.color} />)}
-                      <LabelList dataKey="total" position="right" fontSize={11} formatter={(v) => fmt(v)} />
+                <ResponsiveContainer width="100%" height={380}>
+                  <BarChart
+                    data={comparativo}
+                    margin={{ top: 24, bottom: 80, left: 0, right: 8 }}
+                    onClick={(e) => {
+                      const id = e?.activePayload?.[0]?.payload?.id
+                      if (id) setEmpleadoSel(String(id))
+                    }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--borde)" vertical={false} />
+                    <XAxis
+                      dataKey="nombre" interval={0} angle={-38} textAnchor="end"
+                      fontSize={10.5} tick={{ fill: 'var(--tinta-2)' }} height={80}
+                    />
+                    <YAxis fontSize={12} />
+                    <Tooltip formatter={(v, nombre) => [fmt(v), NOMBRES_SERIES[nombre] || nombre]} />
+                    <Legend verticalAlign="top" align="right" formatter={(v) => NOMBRES_SERIES[v] || v} />
+                    <Bar dataKey="autoliquidable" stackId="v" fill="#0E7C6B" cursor="pointer" />
+                    <Bar dataKey="oferta" stackId="v" fill="#E8A13D" cursor="pointer" />
+                    <Bar dataKey="marca" stackId="v" fill="#3E7CB1" cursor="pointer" />
+                    <Bar dataKey="adicional" stackId="v" fill="#8A6FB0" cursor="pointer" radius={[6, 6, 0, 0]}>
+                      <LabelList dataKey="total" position="top" fontSize={10.5}
+                        formatter={(v) => (v > 0 ? fmt(v) : '')} fill="var(--tinta)" fontWeight={700} />
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>
-                <div className="fila" style={{ marginTop: 8 }}>
-                  {DEPARTAMENTOS.filter((d) => depto === 'Todos' || d === depto).map((d) => (
-                    <span key={d} className="insignia insignia-neutra">
-                      <span style={{ width: 10, height: 10, borderRadius: 3, background: DEPT_COLORS[d], display: 'inline-block' }} />
-                      {d}
-                    </span>
-                  ))}
-                </div>
               </>
             ) : !serieIndividual || serieIndividual.length === 0 ? (
               <>
