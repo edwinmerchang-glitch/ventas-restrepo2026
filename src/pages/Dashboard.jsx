@@ -3,6 +3,7 @@ import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip,
   CartesianGrid, PieChart, Pie, Cell, Legend,
   ComposedChart, Line, ReferenceLine, LabelList,
+  AreaChart, Area,
 } from 'recharts'
 import { supabase, DEPARTAMENTOS, DEPT_COLORS, CATEGORIAS, fmt, hoyISO, primerDiaMesISO, totalVenta } from '../lib/supabase'
 import { Kpi, Cargando, Aviso } from '../components/UI'
@@ -79,13 +80,28 @@ export default function Dashboard() {
     })
     const serieDepto = Object.entries(porDepto).map(([name, value]) => ({ name, value }))
 
+    // Serie diaria por departamento
+    const porDiaDepto = {}
+    filas.forEach((r) => {
+      const d = r.date
+      const dep = r.employees.department
+      if (!porDiaDepto[d]) porDiaDepto[d] = {}
+      porDiaDepto[d][dep] = (porDiaDepto[d][dep] || 0) + totalVenta(r)
+    })
+    const serieEvolucion = Object.entries(porDiaDepto)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, deps]) => ({
+        dia: date.slice(8) + '/' + date.slice(5, 7),
+        ...deps,
+      }))
+
     const porCategoria = CATEGORIAS.map((c) => ({
       name: c.label,
       value: filas.reduce((s, r) => s + (r[c.key] || 0), 0),
       color: c.color,
     }))
 
-    return { total, totalAnt, variacion, empleadosActivos, promedioDia, serieDias, serieDepto, porCategoria }
+    return { total, totalAnt, variacion, empleadosActivos, promedioDia, serieDias, serieDepto, porCategoria, serieEvolucion }
   }, [filas, filasAnt])
 
   // ── Comparativo de todos los funcionarios ──────────────────────────
@@ -275,6 +291,46 @@ export default function Dashboard() {
                 </ResponsiveContainer>
               </>
             )}
+          </div>
+
+          <div className="tarjeta">
+            <div className="tarjeta-titulo">Evolución diaria por departamento</div>
+            <p className="texto-suave" style={{ marginTop: 0 }}>
+              Unidades vendidas por día en cada departamento. Identifica picos, caídas y cuál área lidera cada jornada.
+            </p>
+            <ResponsiveContainer width="100%" height={300}>
+              <AreaChart data={stats.serieEvolucion} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+                <defs>
+                  {DEPARTAMENTOS.map((d) => (
+                    <linearGradient key={d} id={`grad-${d.replace(/\s/g,'')}`} x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={DEPT_COLORS[d]} stopOpacity={0.22} />
+                      <stop offset="95%" stopColor={DEPT_COLORS[d]} stopOpacity={0.02} />
+                    </linearGradient>
+                  ))}
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--borde)" />
+                <XAxis dataKey="dia" fontSize={12} />
+                <YAxis fontSize={12} />
+                <Tooltip formatter={(v, nombre) => [fmt(v), nombre]} />
+                <Legend />
+                {DEPARTAMENTOS
+                  .filter((d) => depto === 'Todos' || d === depto)
+                  .map((d) => (
+                    <Area
+                      key={d}
+                      type="monotone"
+                      dataKey={d}
+                      name={d}
+                      stroke={DEPT_COLORS[d]}
+                      strokeWidth={2.2}
+                      fill={`url(#grad-${d.replace(/\s/g,'')})`}
+                      dot={{ r: 3, fill: DEPT_COLORS[d], strokeWidth: 0 }}
+                      activeDot={{ r: 5 }}
+                      connectNulls
+                    />
+                  ))}
+              </AreaChart>
+            </ResponsiveContainer>
           </div>
 
           <div className="tarjeta">
