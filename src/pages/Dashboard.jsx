@@ -2,10 +2,15 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip,
   CartesianGrid, PieChart, Pie, Cell, Legend,
-  ComposedChart, Line, ReferenceLine,
+  ComposedChart, Line, ReferenceLine, LabelList,
 } from 'recharts'
 import { supabase, DEPARTAMENTOS, DEPT_COLORS, CATEGORIAS, fmt, hoyISO, primerDiaMesISO, totalVenta } from '../lib/supabase'
 import { Kpi, Cargando, Aviso } from '../components/UI'
+
+const NOMBRES_SERIES = {
+  autoliquidable: 'Autoliquidable', oferta: 'Oferta', marca: 'Marca propia',
+  adicional: 'Adicional', acumulado: 'Acumulado', total: 'Total',
+}
 
 export default function Dashboard() {
   const [desde, setDesde] = useState(primerDiaMesISO())
@@ -32,7 +37,6 @@ export default function Dashboard() {
       if (depto !== 'Todos') q = q.eq('employees.department', depto)
       const { data } = await q
 
-      // Período anterior comparable (mismo número de días, inmediatamente antes)
       const d1 = new Date(desde), d2 = new Date(hasta)
       const dias = Math.round((d2 - d1) / 86400000)
       const finAnt = new Date(d1); finAnt.setDate(finAnt.getDate() - 1)
@@ -84,6 +88,24 @@ export default function Dashboard() {
     return { total, totalAnt, variacion, empleadosActivos, promedioDia, serieDias, serieDepto, porCategoria }
   }, [filas, filasAnt])
 
+  // ── Comparativo de todos los funcionarios ──────────────────────────
+  const comparativo = useMemo(() => {
+    if (!filas) return null
+    const visibles = empleados.filter((e) => depto === 'Todos' || e.department === depto)
+    const porEmp = {}
+    filas.forEach((r) => { porEmp[r.employee_id] = (porEmp[r.employee_id] || 0) + totalVenta(r) })
+    return visibles
+      .map((e) => ({
+        id: e.id,
+        nombre: e.name,
+        depto: e.department,
+        total: porEmp[e.id] || 0,
+        color: DEPT_COLORS[e.department] || '#0E7C6B',
+      }))
+      .sort((a, b) => b.total - a.total)
+  }, [filas, empleados, depto])
+
+  // ── Serie diaria del funcionario seleccionado ──────────────────────
   const serieIndividual = useMemo(() => {
     if (!filas || !empleadoSel) return null
     const propias = filas
@@ -98,7 +120,6 @@ export default function Dashboard() {
         oferta: r.oferta || 0,
         marca: r.marca || 0,
         adicional: r.adicional || 0,
-        total: totalVenta(r),
         acumulado: acum,
       }
     })
@@ -159,6 +180,88 @@ export default function Dashboard() {
             <Kpi etiqueta="Vendedores activos" valor={stats.empleadosActivos} detalle="Con registros en el período" color="morado" />
           </div>
 
+          {/* ── Seguimiento por funcionario (gráfica principal) ── */}
+          <div className="tarjeta">
+            <div className="tarjeta-titulo">Seguimiento por funcionario</div>
+            <div className="fila-campos" style={{ maxWidth: 420 }}>
+              <label className="campo">
+                <span className="nombre-campo">Funcionario</span>
+                <select value={empleadoSel} onChange={(e) => setEmpleadoSel(e.target.value)}>
+                  <option value="">Todos — comparativo del equipo</option>
+                  {empleados
+                    .filter((e) => depto === 'Todos' || e.department === depto)
+                    .map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+                </select>
+              </label>
+            </div>
+
+            {!empleadoSel ? (
+              /* Comparativo de todos */
+              <>
+                <p className="texto-suave" style={{ marginTop: 0 }}>
+                  Total del período por funcionario, ordenado de mayor a menor y coloreado por departamento.
+                  Selecciona a alguien para ver su registro día a día.
+                </p>
+                <ResponsiveContainer width="100%" height={Math.max(240, comparativo.length * 34)}>
+                  <BarChart data={comparativo} layout="vertical" margin={{ left: 60, right: 40 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--borde)" horizontal={false} />
+                    <XAxis type="number" fontSize={12} />
+                    <YAxis type="category" dataKey="nombre" width={150} fontSize={11} interval={0} />
+                    <Tooltip formatter={(v) => [fmt(v), 'Unidades']} />
+                    <Bar dataKey="total" radius={[0, 6, 6, 0]} cursor="pointer"
+                      onClick={(d) => d?.id && setEmpleadoSel(String(d.id))}>
+                      {comparativo.map((c) => <Cell key={c.id} fill={c.color} />)}
+                      <LabelList dataKey="total" position="right" fontSize={11} formatter={(v) => fmt(v)} />
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+                <div className="fila" style={{ marginTop: 8 }}>
+                  {DEPARTAMENTOS.filter((d) => depto === 'Todos' || d === depto).map((d) => (
+                    <span key={d} className="insignia insignia-neutra">
+                      <span style={{ width: 10, height: 10, borderRadius: 3, background: DEPT_COLORS[d], display: 'inline-block' }} />
+                      {d}
+                    </span>
+                  ))}
+                </div>
+              </>
+            ) : !serieIndividual || serieIndividual.length === 0 ? (
+              <>
+                <Aviso tipo="ambar">{empSel?.name} no tiene ventas registradas en este período.</Aviso>
+                <button className="boton boton-secundario" onClick={() => setEmpleadoSel('')}>← Volver al comparativo</button>
+              </>
+            ) : (
+              /* Detalle individual */
+              <>
+                <div className="fila entre" style={{ marginBottom: 12 }}>
+                  <span className="texto-suave">
+                    <span className="insignia insignia-neutra" style={{ marginRight: 8 }}>{empSel?.department}</span>
+                    Total período: <strong>{fmt(serieIndividual[serieIndividual.length - 1].acumulado)}</strong>
+                    {' '}· Días con registro: <strong>{serieIndividual.length}</strong>
+                    {' '}· Meta mensual: <strong>{fmt(empSel?.goal || 0)}</strong>
+                  </span>
+                  <button className="boton boton-secundario" onClick={() => setEmpleadoSel('')}>← Volver al comparativo</button>
+                </div>
+                <ResponsiveContainer width="100%" height={300}>
+                  <ComposedChart data={serieIndividual}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--borde)" />
+                    <XAxis dataKey="dia" fontSize={12} />
+                    <YAxis yAxisId="dia" fontSize={12} />
+                    <YAxis yAxisId="acum" orientation="right" fontSize={12} />
+                    <Tooltip formatter={(v, nombre) => [fmt(v), NOMBRES_SERIES[nombre] || nombre]} />
+                    <Legend formatter={(v) => NOMBRES_SERIES[v] || v} />
+                    <Bar yAxisId="dia" dataKey="autoliquidable" stackId="v" fill="#0E7C6B" />
+                    <Bar yAxisId="dia" dataKey="oferta" stackId="v" fill="#E8A13D" />
+                    <Bar yAxisId="dia" dataKey="marca" stackId="v" fill="#3E7CB1" />
+                    <Bar yAxisId="dia" dataKey="adicional" stackId="v" fill="#8A6FB0" radius={[5, 5, 0, 0]} />
+                    <Line yAxisId="acum" type="monotone" dataKey="acumulado" stroke="#14201D" strokeWidth={2.5} dot={{ r: 3 }} />
+                    <ReferenceLine yAxisId="acum" y={empSel?.goal || 0} stroke="#D64545" strokeDasharray="6 4"
+                      label={{ value: 'Meta', fill: '#D64545', fontSize: 11, position: 'right' }} />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </>
+            )}
+          </div>
+
           <div className="tarjeta">
             <div className="tarjeta-titulo">Ventas por día</div>
             <ResponsiveContainer width="100%" height={280}>
@@ -201,63 +304,6 @@ export default function Dashboard() {
                 </BarChart>
               </ResponsiveContainer>
             </div>
-          </div>
-
-          <div className="tarjeta">
-            <div className="tarjeta-titulo">Seguimiento diario individual</div>
-            <div className="fila-campos" style={{ maxWidth: 420 }}>
-              <label className="campo">
-                <span className="nombre-campo">Funcionario</span>
-                <select value={empleadoSel} onChange={(e) => setEmpleadoSel(e.target.value)}>
-                  <option value="">— Selecciona un funcionario —</option>
-                  {empleados
-                    .filter((e) => depto === 'Todos' || e.department === depto)
-                    .map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
-                </select>
-              </label>
-            </div>
-
-            {!empleadoSel ? (
-              <p className="texto-suave">Selecciona un funcionario para ver su registro diario, el desglose por categoría y su avance acumulado frente a la meta.</p>
-            ) : !serieIndividual || serieIndividual.length === 0 ? (
-              <Aviso tipo="info">
-                {empSel?.name} no tiene ventas registradas en este período.
-              </Aviso>
-            ) : (
-              <>
-                <div className="fila" style={{ marginBottom: 12 }}>
-                  <span className="insignia insignia-neutra">{empSel?.department}</span>
-                  <span className="texto-suave">
-                    Total período: <strong>{fmt(serieIndividual[serieIndividual.length - 1].acumulado)}</strong>
-                    {' '}· Días con registro: <strong>{serieIndividual.length}</strong>
-                    {' '}· Meta mensual: <strong>{fmt(empSel?.goal || 0)}</strong>
-                  </span>
-                </div>
-                <ResponsiveContainer width="100%" height={300}>
-                  <ComposedChart data={serieIndividual}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--borde)" />
-                    <XAxis dataKey="dia" fontSize={12} />
-                    <YAxis yAxisId="dia" fontSize={12} label={{ value: 'Por día', angle: -90, position: 'insideLeft', fontSize: 11 }} />
-                    <YAxis yAxisId="acum" orientation="right" fontSize={12} label={{ value: 'Acumulado', angle: 90, position: 'insideRight', fontSize: 11 }} />
-                    <Tooltip formatter={(v, nombre) => [fmt(v), {
-                      autoliquidable: 'Autoliquidable', oferta: 'Oferta', marca: 'Marca propia',
-                      adicional: 'Adicional', acumulado: 'Acumulado',
-                    }[nombre] || nombre]} />
-                    <Legend formatter={(v) => ({
-                      autoliquidable: 'Autoliquidable', oferta: 'Oferta', marca: 'Marca propia',
-                      adicional: 'Adicional', acumulado: 'Acumulado',
-                    }[v] || v)} />
-                    <Bar yAxisId="dia" dataKey="autoliquidable" stackId="v" fill="#0E7C6B" />
-                    <Bar yAxisId="dia" dataKey="oferta" stackId="v" fill="#E8A13D" />
-                    <Bar yAxisId="dia" dataKey="marca" stackId="v" fill="#3E7CB1" />
-                    <Bar yAxisId="dia" dataKey="adicional" stackId="v" fill="#8A6FB0" radius={[5, 5, 0, 0]} />
-                    <Line yAxisId="acum" type="monotone" dataKey="acumulado" stroke="#14201D" strokeWidth={2.5} dot={{ r: 3 }} />
-                    <ReferenceLine yAxisId="acum" y={empSel?.goal || 0} stroke="#D64545" strokeDasharray="6 4"
-                      label={{ value: 'Meta', fill: '#D64545', fontSize: 11, position: 'right' }} />
-                  </ComposedChart>
-                </ResponsiveContainer>
-              </>
-            )}
           </div>
         </>
       )}
