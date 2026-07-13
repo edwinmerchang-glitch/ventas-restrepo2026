@@ -107,7 +107,7 @@ export default function Layout() {
               <Icono d={I.salir} />
               Cerrar sesión
             </button>
-            <div className="credito">© 2026 Locatel Restrepo · v1.0</div>
+            <div className="credito">© 2026 Edwin Merchán · v1.0</div>
           </div>
         </aside>
 
